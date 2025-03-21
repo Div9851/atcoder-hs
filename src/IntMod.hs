@@ -17,7 +17,10 @@ invMod a = case extGCD a modulus of
   (-1, s, _) -> (-s) `mod` modulus
   _ -> error $ show a ++ " has no inverse modulo " ++ show modulus
 
-newtype IntMod = IntMod Int deriving (Eq, Show)
+newtype IntMod = IntMod Int deriving (Eq)
+
+instance Show IntMod where
+  show (IntMod n) = show n
 
 instance Num IntMod where
   IntMod x + IntMod y = IntMod ((x + y) `rem` modulus)
