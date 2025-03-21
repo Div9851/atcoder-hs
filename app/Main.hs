@@ -161,10 +161,10 @@ dijkstra nextStates initial bounds start = runSTUArray $ do
   dist <- newArray bounds initial
   for_ start $ uncurry (writeArray dist)
 
-  let loop queue
-        | Heap.null queue = return ()
-        | otherwise = do
-            let ((d, v), queue') = fromJust $ Heap.viewMin queue
+  let loop queue =
+        case Heap.viewMin queue of
+          Nothing -> return ()
+          Just ((d, v), queue') -> do
             distV <- readArray dist v
             when (d > distV) $ return ()
             let us = nextStates v
