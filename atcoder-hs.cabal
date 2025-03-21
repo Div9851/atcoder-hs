@@ -24,11 +24,6 @@ source-repository head
   location: https://github.com/githubuser/atcoder-hs
 
 library
-  exposed-modules:
-      BufferQueue
-      Combination
-      IntMod
-      NumberTheory
   other-modules:
       Paths_atcoder_hs
   autogen-modules:
