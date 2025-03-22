@@ -21,6 +21,7 @@ import Data.Array.Unboxed (UArray)
 import Data.ByteString.Char8 qualified as BS
 import Data.Foldable (find, for_)
 import Data.Heap qualified as Heap
+import Data.List qualified as L
 import Data.Maybe (fromJust)
 import Data.Ratio (denominator, numerator)
 import Data.Sequence qualified as Seq
@@ -197,6 +198,25 @@ dijkstra nextStates initial bounds start = runSTUArray $ do
 
 constructGraph :: (IA.Ix v) => (v, v) -> [(v, e)] -> Array v [e]
 constructGraph = IA.accumArray (flip (:)) []
+
+{-- リスト --}
+
+powerSet :: [a] -> [[a]]
+powerSet = filterM (const [False, True])
+
+combinations :: Int -> [a] -> [[a]]
+combinations 0 _ = [[]]
+combinations _ [] = []
+combinations k (x : xs) =
+  map (x :) (combinations (k - 1) xs)
+    ++ combinations k xs
+
+-- リストの分割の仕方を全て返す。分割の仕方の総数はベル数になる。
+partitions :: [a] -> [[[a]]]
+partitions [] = [[]]
+partitions (x : xs) =
+  [(x : ys) : rest | (ys : rest) <- partitions xs]
+    ++ map ([x] :) (partitions xs)
 
 {-- 配列 --}
 
