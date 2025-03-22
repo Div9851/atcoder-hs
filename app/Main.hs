@@ -59,7 +59,7 @@ getCharGrid b@((s, _), (h, _)) = do
   xs <- replicateM (h + 1 - s) BS.getLine
   return $ IA.listArray @UArray b $ BS.unpack $ BS.concat xs
 
-{-- mod --}
+{-- 整数論 --}
 
 modulus :: Int
 modulus = 998244353
@@ -98,8 +98,6 @@ modPow _ 0 = 1
 modPow a n =
   let x = modPow a (n `div` 2)
    in if even n then x * x else a * x * x
-
-{-- 数論 --}
 
 type PrimeTable = VU.Vector (Bool, Int)
 
@@ -142,7 +140,10 @@ combination fact invFact n k
   | k < 0 || k > n = 0
   | otherwise = fact V.! n * (invFact V.! k) * (invFact V.! (n - k))
 
-{-- 探索 --}
+{-- グラフ --}
+
+constructGraph :: (IA.Ix v) => (v, v) -> [(v, e)] -> Array v [e]
+constructGraph = IA.accumArray (flip (:)) []
 
 around4 :: UArray (Int, Int) Char -> (Int, Int) -> [(Int, Int)]
 around4 grid (x, y) = [pos | pos <- [(x + 1, y), (x, y + 1), (x - 1, y), (x, y - 1)], check pos]
@@ -194,12 +195,7 @@ dijkstra nextStates initial bounds start = runSTUArray $ do
   loop $ Heap.fromList $ map (\(x, y) -> (y, x)) start
   return dist
 
-{-- グラフ --}
-
-constructGraph :: (IA.Ix v) => (v, v) -> [(v, e)] -> Array v [e]
-constructGraph = IA.accumArray (flip (:)) []
-
-{-- リスト --}
+{-- リスト/配列 --}
 
 powerSet :: [a] -> [[a]]
 powerSet = filterM (const [False, True])
@@ -211,20 +207,17 @@ combinations k (x : xs) =
   map (x :) (combinations (k - 1) xs)
     ++ combinations k xs
 
--- リストの分割の仕方を全て返す。分割の仕方の総数はベル数になる。
 partitions :: [a] -> [[[a]]]
 partitions [] = [[]]
 partitions (x : xs) =
   [(x : ys) : rest | (ys : rest) <- partitions xs]
     ++ map ([x] :) (partitions xs)
 
-{-- 配列 --}
-
 findArrayIndex :: (IA.IArray a e, IA.Ix i) => (e -> Bool) -> a i e -> Maybe i
 findArrayIndex f as = fst <$> find (f . snd) (IA.assocs as)
 {-# INLINE findArrayIndex #-}
 
-{-- リングバッファ --}
+{-- データ構造 --}
 
 data Buffer s a = Buffer
   { bufferVars :: !(VUM.MVector s Int),
