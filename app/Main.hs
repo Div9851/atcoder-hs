@@ -143,6 +143,11 @@ combination fact invFact n k
 
 {-- 探索 --}
 
+around4 :: UArray (Int, Int) Char -> (Int, Int) -> [(Int, Int)]
+around4 grid (x, y) = [pos | pos <- [(x + 1, y), (x, y + 1), (x - 1, y), (x, y - 1)], check pos]
+  where
+    check pos = IA.inRange (IA.bounds grid) pos && grid IA.! pos /= '#'
+
 bfs :: (IA.Ix v) => (v -> [v]) -> Int -> (v, v) -> [(v, Int)] -> UArray v Int
 bfs nextStates initial bounds start = runSTUArray $ do
   dist <- newArray bounds initial
