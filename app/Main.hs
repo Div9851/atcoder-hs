@@ -1,4 +1,5 @@
 {-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE ImportQualifiedPost #-}
@@ -26,6 +27,7 @@ import Data.Sequence qualified as Seq
 import Data.Vector qualified as V
 import Data.Vector.Unboxed qualified as VU
 import Data.Vector.Unboxed.Mutable qualified as VUM
+import Debug.Trace (traceShow)
 
 main :: IO ()
 main = pure ()
@@ -256,3 +258,17 @@ pushBackBuf Buffer {bufferVars, internalBuffer, internalBufferSize} x = do
   assert (b' /= f) $ do
     VUM.unsafeWrite internalBuffer b x
 {-# INLINE pushBackBuf #-}
+
+{-- デバッグ --}
+
+#ifndef ATCODER
+
+dbg :: (Show a) => a -> ()
+dbg = (`traceShow` ())
+
+#else
+
+dbg :: (Show a) => a -> ()
+dbg = const ()
+
+#endif
