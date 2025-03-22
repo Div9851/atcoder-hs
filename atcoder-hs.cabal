@@ -242,6 +242,7 @@ test-suite atcoder-hs-test
     , ghc-prim ==0.9.0
     , hashable >=1.4.2.0 && <1.5
     , heaps ==0.4.*
+    , hspec
     , indexed-traversable >=0.1.2.1 && <0.2
     , indexed-traversable-instances >=0.1.1.2 && <0.2
     , integer-gmp ==1.1.*
