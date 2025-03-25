@@ -1,5 +1,6 @@
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE CPP #-}
+{-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE ImportQualifiedPost #-}
@@ -18,6 +19,7 @@ import Data.Array.Base (newArray, readArray, writeArray)
 import Data.Array.IArray qualified as IA
 import Data.Array.ST (runSTUArray)
 import Data.Array.Unboxed (UArray)
+import Data.Bits ((.&.))
 import Data.ByteString.Char8 qualified as BS
 import Data.Foldable (find, foldl', for_)
 import Data.Heap qualified as Heap
@@ -310,7 +312,7 @@ segTreeSet :: (VU.Unbox a, PrimMonad m) => SegTree (PrimState m) a -> Int -> a -
 segTreeSet SegTree {op, _data, size} pos val = do
   let k = pos + size
   VUM.unsafeWrite _data k val
-  let loop i
+  let loop !i
         | i == 1 = return ()
         | otherwise = do
             let p = i `div` 2
@@ -323,15 +325,41 @@ segTreeSet SegTree {op, _data, size} pos val = do
 
 segTreeProduct :: (VU.Unbox a, PrimMonad m) => SegTree (PrimState m) a -> Int -> Int -> m a
 segTreeProduct SegTree {op, e, _data, size} l r = do
-  let loop l r ansL ansR
+  let loop !l !r !ansL !ansR
         | l >= r = return (op ansL ansR)
         | otherwise = do
             ansL' <- if odd l then do (`op` ansL) <$> VUM.unsafeRead _data l else return ansL
             ansR' <- if odd r then do (`op` ansR) <$> VUM.unsafeRead _data (r - 1) else return ansR
-            let !newAnsL = ansL'
-                !newAnsR = ansR'
-            loop ((l + 1) `div` 2) (r `div` 2) newAnsL newAnsR
+            loop ((l + 1) `div` 2) (r `div` 2) ansL' ansR'
   loop (l + size) (r + size) e e
+
+data FenwickTree s a = FenwickTree
+  { _data :: !(VUM.MVector s a),
+    size :: !Int
+  }
+
+newFenwickTree :: (VU.Unbox a, Num a, PrimMonad m) => Int -> m (FenwickTree (PrimState m) a)
+newFenwickTree n = do
+  _data <- VUM.replicate (n + 1) 0
+  return $ FenwickTree _data n
+
+fenwickTreeAdd :: (VU.Unbox a, Num a, PrimMonad m) => FenwickTree (PrimState m) a -> Int -> a -> m ()
+fenwickTreeAdd FenwickTree {_data, size} pos val = do
+  let loop !i
+        | i > size = return ()
+        | otherwise = do
+            VUM.unsafeModify _data (+ val) i
+            loop (i + (i .&. (-i)))
+  loop (pos + 1)
+
+fenwickTreeSum :: (VU.Unbox a, Num a, PrimMonad m) => FenwickTree (PrimState m) a -> Int -> m a
+fenwickTreeSum FenwickTree {_data} pos = do
+  let loop !i !acc
+        | i == 0 = return acc
+        | otherwise = do
+            x <- VUM.unsafeRead _data i
+            loop (i - (i .&. (-i))) (acc + x)
+  loop pos 0
 
 {-- デバッグ --}
 
