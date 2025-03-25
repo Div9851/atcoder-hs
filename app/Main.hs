@@ -11,7 +11,7 @@
 {-# LANGUAGE TypeFamilies #-}
 
 import Control.Exception (assert)
-import Control.Monad (filterM, foldM, forM_, replicateM, when)
+import Control.Monad (filterM, foldM, foldM_, forM, forM_, replicateM, when)
 import Control.Monad.Primitive (PrimMonad, PrimState)
 import Data.Array (Array)
 import Data.Array.Base (newArray, readArray, writeArray)
@@ -19,13 +19,16 @@ import Data.Array.IArray qualified as IA
 import Data.Array.ST (runSTUArray)
 import Data.Array.Unboxed (UArray)
 import Data.ByteString.Char8 qualified as BS
-import Data.Foldable (find, for_)
+import Data.Foldable (find, foldl', for_)
 import Data.Heap qualified as Heap
 import Data.List qualified as L
-import Data.Maybe (fromJust)
+import Data.Maybe (fromJust, isJust)
+import Data.Ord (Down (..), comparing)
 import Data.Ratio (denominator, numerator)
 import Data.Sequence qualified as Seq
+import Data.Set qualified as Set
 import Data.Vector qualified as V
+import Data.Vector.Algorithms.Search (binarySearchL, binarySearchR)
 import Data.Vector.Unboxed qualified as VU
 import Data.Vector.Unboxed.Mutable qualified as VUM
 import Debug.Trace (traceShow)
@@ -276,6 +279,59 @@ pushBackBuf Buffer {bufferVars, internalBuffer, internalBufferSize} x = do
   assert (b' /= f) $ do
     VUM.unsafeWrite internalBuffer b x
 {-# INLINE pushBackBuf #-}
+
+data SegTree s a = SegTree
+  { op :: !(a -> a -> a),
+    e :: !a,
+    _data :: !(VUM.MVector s a),
+    size :: !Int
+  }
+
+segTreeFromList :: (VU.Unbox a, PrimMonad m) => (a -> a -> a) -> a -> [a] -> m (SegTree (PrimState m) a)
+segTreeFromList op e xs = do
+  let size = length xs
+  let v = VU.fromList xs
+  _data <- VUM.unsafeNew (2 * size)
+  for_ [2 * size - 1, 2 * size - 2 .. 1] $ \i -> do
+    if i < size
+      then do
+        x <- VUM.unsafeRead _data (i * 2)
+        y <- VUM.unsafeRead _data (i * 2 + 1)
+        VUM.unsafeWrite _data i (op x y)
+      else do
+        let x = v VU.! (i - size)
+        VUM.unsafeWrite _data i x
+  return $ SegTree op e _data size
+
+segTreeGet :: (VU.Unbox a, PrimMonad m) => SegTree (PrimState m) a -> Int -> m a
+segTreeGet SegTree {_data, size} pos = VUM.unsafeRead _data (pos + size)
+
+segTreeSet :: (VU.Unbox a, PrimMonad m) => SegTree (PrimState m) a -> Int -> a -> m ()
+segTreeSet SegTree {op, _data, size} pos val = do
+  let k = pos + size
+  VUM.unsafeWrite _data k val
+  let loop i
+        | i == 1 = return ()
+        | otherwise = do
+            let p = i `div` 2
+            x <- VUM.unsafeRead _data (p * 2)
+            y <- VUM.unsafeRead _data (p * 2 + 1)
+            let !newVal = op x y
+            VUM.unsafeWrite _data p newVal
+            loop p
+  loop k
+
+segTreeProduct :: (VU.Unbox a, PrimMonad m) => SegTree (PrimState m) a -> Int -> Int -> m a
+segTreeProduct SegTree {op, e, _data, size} l r = do
+  let loop l r ansL ansR
+        | l >= r = return (op ansL ansR)
+        | otherwise = do
+            ansL' <- if odd l then do (`op` ansL) <$> VUM.unsafeRead _data l else return ansL
+            ansR' <- if odd r then do (`op` ansR) <$> VUM.unsafeRead _data (r - 1) else return ansR
+            let !newAnsL = ansL'
+                !newAnsR = ansR'
+            loop ((l + 1) `div` 2) (r `div` 2) newAnsL newAnsR
+  loop (l + size) (r + size) e e
 
 {-- デバッグ --}
 
