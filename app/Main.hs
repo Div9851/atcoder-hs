@@ -11,6 +11,7 @@
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
 
+import Control.Comonad.Representable.Store (ComonadStore (pos))
 import Control.Exception (assert)
 import Control.Monad (filterM, foldM, foldM_, forM, forM_, replicateM, when)
 import Control.Monad.Primitive (PrimMonad, PrimState)
@@ -19,7 +20,7 @@ import Data.Array.Base (newArray, readArray, writeArray)
 import Data.Array.IArray qualified as IA
 import Data.Array.ST (runSTUArray)
 import Data.Array.Unboxed (UArray)
-import Data.Bits ((.&.))
+import Data.Bits ((.&.), (.<<.), (.>>.), (.^.))
 import Data.ByteString.Char8 qualified as BS
 import Data.Foldable (find, foldl', for_)
 import Data.Heap qualified as Heap
@@ -101,7 +102,7 @@ instance Fractional IntMod where
 modPow :: IntMod -> Int -> IntMod
 modPow _ 0 = 1
 modPow a n =
-  let x = modPow a (n `div` 2)
+  let x = modPow a (n .>>. 1)
    in if even n then x * x else a * x * x
 
 type PrimeTable = VU.Vector (Bool, Int)
@@ -297,9 +298,9 @@ segTreeFromList op e xs = do
   for_ [2 * size - 1, 2 * size - 2 .. 1] $ \i -> do
     if i < size
       then do
-        x <- VUM.unsafeRead _data (i * 2)
-        y <- VUM.unsafeRead _data (i * 2 + 1)
-        VUM.unsafeWrite _data i (op x y)
+        x <- VUM.unsafeRead _data (i .<<. 1)
+        y <- VUM.unsafeRead _data ((i .<<. 1) + 1)
+        VUM.unsafeWrite _data i (x `op` y)
       else do
         let x = v VU.! (i - size)
         VUM.unsafeWrite _data i x
@@ -315,22 +316,22 @@ segTreeSet SegTree {op, _data, size} pos val = do
   let loop !i
         | i == 1 = return ()
         | otherwise = do
-            let p = i `div` 2
-            x <- VUM.unsafeRead _data (p * 2)
-            y <- VUM.unsafeRead _data (p * 2 + 1)
-            let !newVal = op x y
+            let p = i .>>. 1
+            x <- VUM.unsafeRead _data (p .<<. 1)
+            y <- VUM.unsafeRead _data ((p .<<. 1) + 1)
+            let !newVal = x `op` y
             VUM.unsafeWrite _data p newVal
             loop p
   loop k
 
-segTreeProduct :: (VU.Unbox a, PrimMonad m) => SegTree (PrimState m) a -> Int -> Int -> m a
-segTreeProduct SegTree {op, e, _data, size} l r = do
+segTreeProd :: (VU.Unbox a, PrimMonad m) => SegTree (PrimState m) a -> Int -> Int -> m a
+segTreeProd SegTree {op, e, _data, size} l r = do
   let loop !l !r !ansL !ansR
-        | l >= r = return (op ansL ansR)
+        | l >= r = return (ansL `op` ansR)
         | otherwise = do
-            ansL' <- if odd l then do (`op` ansL) <$> VUM.unsafeRead _data l else return ansL
+            ansL' <- if odd l then do (ansL `op`) <$> VUM.unsafeRead _data l else return ansL
             ansR' <- if odd r then do (`op` ansR) <$> VUM.unsafeRead _data (r - 1) else return ansR
-            loop ((l + 1) `div` 2) (r `div` 2) ansL' ansR'
+            loop ((l + 1) .>>. 1) (r .>>. 1) ansL' ansR'
   loop (l + size) (r + size) e e
 
 data FenwickTree s a = FenwickTree
@@ -360,6 +361,103 @@ fenwickTreeSum FenwickTree {_data} pos = do
             x <- VUM.unsafeRead _data i
             loop (i - (i .&. (-i))) (acc + x)
   loop pos 0
+
+data LazySegTree s a f = LazySegTree
+  { op :: !(a -> a -> a),
+    e :: !a,
+    mapping :: !(f -> a -> a),
+    composition :: !(f -> f -> f),
+    _id :: !f,
+    _data :: !(VUM.MVector s a),
+    _lazy :: !(VUM.MVector s f),
+    size :: !Int
+  }
+
+_lazySegTreeEval :: (VU.Unbox a, VU.Unbox f, PrimMonad m) => LazySegTree (PrimState m) a f -> Int -> m a
+_lazySegTreeEval LazySegTree {mapping, _data, _lazy} pos = do
+  x <- VUM.unsafeRead _data pos
+  f <- VUM.unsafeRead _lazy pos
+  return $ mapping f x
+
+_lazySegTreePropagate :: (VU.Unbox a, VU.Unbox f, PrimMonad m) => LazySegTree (PrimState m) a f -> Int -> m ()
+_lazySegTreePropagate seg@LazySegTree {composition, _id, _data, _lazy} pos = do
+  let hs = takeWhile (<= pos) (iterate (.<<. 1) 2)
+  for_ (reverse hs) $ \h -> do
+    let pos' = pos `div` h
+    f <- VUM.unsafeRead _lazy pos'
+    val <- _lazySegTreeEval seg pos'
+    VUM.unsafeWrite _data pos' val
+    VUM.unsafeWrite _lazy pos' _id
+    VUM.unsafeModify _lazy (`composition` f) (pos' .<<. 1)
+    VUM.unsafeModify _lazy (`composition` f) ((pos' .<<. 1) + 1)
+
+_lazySegTreeUpdate :: (VU.Unbox a, VU.Unbox f, PrimMonad m) => LazySegTree (PrimState m) a f -> Int -> m ()
+_lazySegTreeUpdate seg@LazySegTree {op, _data} pos = do
+  let hs = takeWhile (<= pos) (iterate (.<<. 1) 2)
+  for_ hs $ \h -> do
+    let pos' = pos `div` h
+    ansL <- _lazySegTreeEval seg (pos' .<<. 1)
+    ansR <- _lazySegTreeEval seg ((pos' .<<. 1) + 1)
+    VUM.unsafeWrite _data pos' (ansL `op` ansR)
+
+lazySegTreeFromList :: (VU.Unbox a, VU.Unbox f, PrimMonad m) => (a -> a -> a) -> a -> (f -> a -> a) -> (f -> f -> f) -> f -> [a] -> m (LazySegTree (PrimState m) a f)
+lazySegTreeFromList op e mapping composition _id xs = do
+  let size = length xs
+  let v = VU.fromList xs
+  _data <- VUM.unsafeNew (2 * size)
+  _lazy <- VUM.replicate (2 * size) _id
+  for_ [2 * size - 1, 2 * size - 2 .. 1] $ \i -> do
+    if i < size
+      then do
+        x <- VUM.unsafeRead _data (i .<<. 1)
+        y <- VUM.unsafeRead _data ((i .<<. 1) + 1)
+        VUM.unsafeWrite _data i (x `op` y)
+      else do
+        let x = v VU.! (i - size)
+        VUM.unsafeWrite _data i x
+  return $ LazySegTree op e mapping composition _id _data _lazy size
+
+_lazySegTreeApply :: (VU.Unbox f, PrimMonad m) => LazySegTree (PrimState m) a f -> Int -> Int -> f -> m ()
+_lazySegTreeApply LazySegTree {composition, _lazy} l r f = do
+  let loop !l !r
+        | l >= r = return ()
+        | otherwise = do
+            when (odd l) $ VUM.unsafeModify _lazy (`composition` f) l
+            when (odd r) $ VUM.unsafeModify _lazy (`composition` f) (r - 1)
+            loop ((l + 1) .>>. 1) (r .>>. 1)
+  loop l r
+
+lazySegTreeApply :: (VU.Unbox a, VU.Unbox f, PrimMonad m) => LazySegTree (PrimState m) a f -> Int -> Int -> f -> m ()
+lazySegTreeApply seg@LazySegTree {size} a b f = do
+  let l = a + size
+      r = b + size
+      l' = l `div` (l .&. (-l))
+      r' = r `div` (r .&. (-r)) - 1
+  _lazySegTreePropagate seg l'
+  _lazySegTreePropagate seg r'
+  _lazySegTreeApply seg l r f
+  _lazySegTreeUpdate seg l'
+  _lazySegTreeUpdate seg r'
+
+_lazySegTreeProd :: (VU.Unbox a, VU.Unbox f, PrimMonad m) => LazySegTree (PrimState m) a f -> Int -> Int -> m a
+_lazySegTreeProd seg@LazySegTree {op, e} l r = do
+  let loop !l !r !ansL !ansR
+        | l >= r = return (ansL `op` ansR)
+        | otherwise = do
+            ansL' <- if odd l then do (ansL `op`) <$> _lazySegTreeEval seg l else return ansL
+            ansR' <- if odd r then do (`op` ansR) <$> _lazySegTreeEval seg (r - 1) else return ansR
+            loop ((l + 1) .>>. 1) (r .>>. 1) ansL' ansR'
+  loop l r e e
+
+lazySegTreeProd :: (VU.Unbox a, VU.Unbox f, PrimMonad m) => LazySegTree (PrimState m) a f -> Int -> Int -> m a
+lazySegTreeProd seg@LazySegTree {size} a b = do
+  let l = a + size
+      r = b + size
+      l' = l `div` (l .&. (-l))
+      r' = r `div` (r .&. (-r)) - 1
+  _lazySegTreePropagate seg l'
+  _lazySegTreePropagate seg r'
+  _lazySegTreeProd seg l r
 
 {-- デバッグ --}
 
